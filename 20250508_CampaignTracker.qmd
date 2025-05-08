@@ -1,0 +1,519 @@
+---
+title: "Brandsly & RStudio Kickoff Example"
+author: "Michael Demsko Jr"
+date: "2025-05-08"
+format:
+  html:
+    toc: true
+    code-fold: true
+    code-summary: "Show code"
+    code-tools:
+      toggle: true
+    code-overflow: wrap
+editor: visual
+---
+
+## Description
+
+In this example, we will go through the entire data cycle. We'll **import Facebook Ads campaign data** from PostgreSQL via an ODBC connection as well as from Google Sheets using a combination of APIs wrapped within the googlesheets4 library. We'll **examine the data quality, clean accordingly, and wrangle the data** to get a complete picture. Next, we will conduct a brief **exploratory data analysis accompanied by visualizations** built with ggplot2 and plotly. Finally, we will **model the data** using Python's SciKit Learn and **build an API connection to share our findings** with GoogleBigQuery users.
+
+## Install/Load Libraries
+
+```{r}
+
+#| output: false
+#| warning: false
+#| message: false
+
+## Install Libraries
+# Importing Data, Working with APIs
+# install.packages("tidyr")
+# install.packages("dotenv")
+# install.packages("httr2")
+# install.packages("googlesheets4")
+# install.packages("DBI")
+# install.packages("RPostgres")
+# 
+# # Interact with JSON, manipulate data frames
+# install.packages("purrr")
+# install.packages("dplyr")
+# 
+# # Create Data Visualizations
+# install.packages("DT")
+# install.packages("ggplot2")
+# install.packages("plotly") 
+
+##Publishing to Connect
+# install.packages("rsconnect")
+
+## Load Libraries
+suppressWarnings(
+   suppressPackageStartupMessages({
+     library(tidyr)
+     library(dotenv)
+     library(httr2)  
+     library(googlesheets4)
+     library(DBI)
+     library(RPostgres)
+     library(purrr)
+     library(dplyr)
+     library(reticulate)
+     library(DT)
+     library(ggplot2)
+     library(plotly)
+     library(rsconnect)
+})
+)
+```
+
+## Import Data
+
+Facebook Ads Data - Stored in PostgreSQL
+
+```{r}
+
+# Establish a conneciton to the PG DB
+
+pg_con <- DBI::dbConnect(
+   RPostgres::Postgres(),
+   dbname = Sys.getenv("PGDATABASE"),
+   host = Sys.getenv("PGHOST"),
+   port = 5432,
+   user = Sys.getenv("PGUSER"),
+   password = Sys.getenv("PGPASSWORD")
+)
+
+# Retrieve all records from facebook_ads table
+
+facebook_ads_pg_df <- DBI::dbGetQuery(pg_con, "SELECT * FROM facebook_ads;")
+
+dbDisconnect(pg_con)
+```
+
+Supplementary Campaign Info - Stored in Google Sheets
+
+```{r}
+
+options(gargle_oauth_cache = ".secrets",
+    gargle_oauth_email = TRUE)
+suppressMessages(
+   googlesheets4::gs4_auth()
+)
+sheet_url <- Sys.getenv("SHEETURL")
+suppressMessages(
+   facebook_ads_sheets_df <- read_sheet(sheet_url)
+)
+
+```
+
+## Clean & Wrangle Data
+
+### PostgreSQL Data
+
+#### Overview
+
+**Columns names and data types**
+
+```{r}
+
+#  Columns, data types
+facebook_ads_pg_ds <- data.frame(
+  column = names(facebook_ads_pg_df),
+  type = sapply(facebook_ads_pg_df, class)
+)
+
+DT::datatable(facebook_ads_pg_ds, rownames = FALSE)
+```
+
+```{r}
+# Number of records
+n_facebook_ads_pg <- nrow(facebook_ads_pg_df)
+```
+
+**Data Volume:** The PostgreSQL data contains `r n_facebook_ads_pg` records
+
+#### **PostgreSQL Data Hygiene**
+
+**Missing Values by Column**
+
+```{r}
+#  Missing values by column
+missing_summary_fb_pg <- data.frame(
+  column = names(facebook_ads_pg_df),
+  missing_count = colSums(is.na(facebook_ads_pg_df)),
+  total_rows = nrow(facebook_ads_pg_df)
+)
+
+missing_summary_fb_pg$missing_pct <- round(
+  100 * missing_summary_fb_pg$missing_count / missing_summary_fb_pg$total_rows,
+  1
+)
+
+
+DT::datatable(missing_summary_fb_pg, rownames = FALSE)
+```
+
+```{r}
+
+# Check for duplicate records
+
+dups_fb_pg <- facebook_ads_pg_df[duplicated(facebook_ads_pg_df), ]
+n_dups_fb_pg  <- nrow(dups_fb_pg)
+```
+
+**Duplicates:** The PostgreSQL data contains `r n_dups_fb_pg` duplicate records
+
+### Google Sheets Data
+
+#### Overview
+
+**Column names and data types**
+
+```{r}
+#  Columns, data types
+facebook_ads_sheets_ds <- data.frame(
+  column = names(facebook_ads_sheets_df),
+  type = sapply(facebook_ads_sheets_df, class)
+)
+
+DT::datatable(facebook_ads_sheets_ds, rownames = FALSE)
+```
+
+```{r}
+# Number of records
+n_facebook_ads_sheets <- nrow(facebook_ads_sheets_df)
+```
+
+**Data Volume:** The Google Sheets data contains `r n_facebook_ads_sheets` records
+
+#### Google Sheets Data Hygiene
+
+**Missing values by column**
+
+```{r}
+
+#  Missing values by column
+missing_summary_fb_sheets <- data.frame(
+  column = names(facebook_ads_sheets_df),
+  missing_count = colSums(is.na(facebook_ads_sheets_df)),
+  total_rows = nrow(facebook_ads_sheets_df)
+)
+
+missing_summary_fb_sheets$missing_pct <- round(
+  100 * missing_summary_fb_sheets$missing_count / missing_summary_fb_sheets$total_rows, 1
+)
+
+DT::datatable(missing_summary_fb_sheets, rownames = FALSE)
+```
+
+```{r}
+# Check for duplicate records
+
+dups_fb_sheets <- facebook_ads_sheets_df[duplicated(facebook_ads_sheets_df), ]
+n_dups_fb_sheets  <- nrow(dups_fb_sheets)
+```
+
+**Duplicates:** The Google Sheets data contains `r n_dups_fb_sheets` duplicate records
+
+### Wrangle Data
+
+-   There's a significant amount of missing values in the `campaign_id` and `fb_campaign_id` columns in the Postgres table
+
+-   We'll address this by filling in the missing data via a supplemental data set provided by our Rev Ops Team via Google Sheets
+
+**First** let's quickly clean up some the columns name mismatch for campaign ID
+
+```{r}
+
+#dplyr code to find the missing value and joining the data accoridngly 
+facebook_ads_sheets_df_clean <- facebook_ads_sheets_df |> 
+   dplyr::rename(campaign_id = xyz_campaign_id)
+  
+```
+
+**Next** we can left join the two data sets and use the coalesce function to update the missing values to get our final data set
+
+```{r}
+
+facebook_ads_merged <- facebook_ads_pg_df |> 
+   left_join(facebook_ads_sheets_df_clean,
+     by = "ad_id",
+     suffix = c("", "_new")) |> 
+   mutate(
+     campaign_id = coalesce(campaign_id, campaign_id_new),
+     fb_campaign_id = coalesce(fb_campaign_id, fb_campaign_id_new)
+  ) |> 
+  select(-campaign_id_new, -fb_campaign_id_new)
+```
+
+**One more check** for safety, any missing values or duplicate records?
+
+```{r}
+
+# Check for missing values
+
+missing_summary_fb_merged <- data.frame(
+  column = names(facebook_ads_merged),
+  missing_count = colSums(is.na(facebook_ads_merged)),
+  total_rows = nrow(facebook_ads_merged)
+)
+
+missing_summary_fb_merged$missing_pct <- round(100 * missing_summary_fb_merged$missing_count / missing_summary_fb_merged$total_rows, 1)
+
+DT::datatable(missing_summary_fb_merged, rownames = FALSE)
+```
+
+```{r}
+
+# Check for duplicate records
+duplicates_fb_merged <- facebook_ads_merged[duplicated(facebook_ads_merged), ]
+n_duplicates_fb_merged  <- nrow(duplicates_fb_merged)
+
+```
+
+**Duplicates:** The merged data set contains `r n_duplicates_fb_merged` duplicate records
+
+## EDA
+
+### Demographics
+
+```{r}
+
+## Logic
+
+# total observations by campaign
+campaign_totals <- facebook_ads_merged |> 
+  group_by(campaign_id) |> 
+  summarise(total_obs = n(), .groups = "drop") |> 
+  arrange(desc(total_obs))
+
+# Age distribution by campaign
+age_dist_by_campaign <- facebook_ads_merged |> 
+  group_by(campaign_id, age) |> 
+  summarise(count = n(), .groups = "drop") |> 
+  group_by(campaign_id) |> 
+  mutate(pct = round(100 * count / sum(count), 1))
+
+# Gender distributiom by campaign
+gender_dist_by_campaign <- facebook_ads_merged |> 
+  group_by(campaign_id, gender) |> 
+  summarise(count = n(), .groups = "drop") |> 
+  group_by(campaign_id) |> 
+  mutate(pct = round(100 * count / sum(count), 1)) |> 
+  ungroup()
+```
+
+```{r}
+
+## Visualizations 
+
+#Total Observations by Campaign 
+campaign_totals_static <-ggplot(campaign_totals, aes(x = factor(campaign_id), y = total_obs)) +
+  geom_col(aes(fill = factor(campaign_id))) +
+  labs(
+    title = "Total Observations per Campaign",
+    x = "Campaign ID",
+    y = "Total Observations"
+  ) +
+  theme_minimal()
+
+campaign_totals_interact <- ggplotly(campaign_totals_static)
+campaign_totals_interact
+
+# Age distribution by campaign
+age_dist_static <- ggplot(age_dist_by_campaign, aes(x = factor(campaign_id), y = count, fill = age)) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "Age Distribution per Campaign",
+    x = "Campaign ID",
+    y = "Count",
+    fill = "Age Group"
+  ) +
+  theme_minimal()
+
+age_dist_interact <- ggplotly(age_dist_static)
+age_dist_interact
+
+# Gender distributiom by campaign
+gender_dist_static <- ggplot(gender_dist_by_campaign, aes(x = factor(campaign_id), y = count, fill = gender)) +
+  geom_col(position = "dodge") +
+  labs(
+    title = "Gender Distribution per Campaign",
+    x = "Campaign ID",
+    y = "Count",
+    fill = "Gender"
+  ) +
+  theme_minimal()
+
+gender_dist_interact <- ggplotly(gender_dist_static)
+gender_dist_interact
+```
+
+### Performance
+
+```{r}
+
+## Logic 
+
+# Conversions and approved conversions by campaign
+
+conversion_summary <- facebook_ads_merged |> 
+  group_by(campaign_id) |> 
+  summarise(
+    total_conversions = sum(total_conversions, na.rm = TRUE),
+    approved_conversion = sum(approved_conversion, na.rm = TRUE),
+    .groups = "drop"
+  ) |> 
+  pivot_longer(
+    cols = c(total_conversions, approved_conversion),
+    names_to = "conversion_type",
+    values_to = "count"
+  )
+
+# Approval Rates
+
+approval_rates <- facebook_ads_merged |> 
+  group_by(campaign_id) |> 
+  summarise(
+    total = sum(total_conversions, na.rm = TRUE),
+    approved = sum(approved_conversion, na.rm = TRUE),
+    approval_rate = round(100 * approved / total, 1),
+    .groups = "drop"
+  )
+
+# Campaign Metrics
+
+campaign_metrics <- facebook_ads_merged |> 
+  group_by(campaign_id) |> 
+  summarise(
+    impressions = sum(impressions, na.rm = TRUE),
+    clicks = sum(clicks, na.rm = TRUE),
+    spent = sum(spent, na.rm = TRUE),
+    total_conversions = sum(total_conversions, na.rm = TRUE),
+    approved_conversions = sum(approved_conversion, na.rm = TRUE),
+    .groups = "drop"
+  ) |> 
+mutate(
+  ctr = ifelse(impressions > 0, round(100 * clicks / impressions, 2), NA),
+  total_cr = ifelse(clicks > 0, round(100 * total_conversions / clicks, 2), NA),
+  approved_cr = ifelse(clicks > 0, round(100 * approved_conversions / clicks, 2), NA),
+  cpc = ifelse(clicks > 0, round(spent / clicks, 2), NA),
+  cpcv = ifelse(total_conversions > 0, round(spent / total_conversions, 2), NA)
+)
+
+
+```
+
+```{r}
+
+## Visualization 
+
+
+# Click through rate
+
+ctr_static <- ggplot(campaign_metrics, aes(x = factor(campaign_id), y = ctr)) +
+  geom_col(aes(fill = factor(campaign_id))) +
+  labs(
+    title = "Click-Through Rate (CTR) per Campaign",
+    x = "Campaign ID",
+    y = "CTR (%)"
+  ) +
+  theme_minimal()
+ctr_interact <- ggplotly(ctr_static)
+ctr_interact
+
+# Conversion rate
+
+cr_static <- ggplot(campaign_metrics, aes(x = factor(campaign_id), y = total_cr)) +
+  geom_col(aes(fill = factor(campaign_id))) +
+  labs(
+    title = "Total Conversion Rate per Campaign",
+    x = "Campaign ID",
+    y = "Conversion Rate (%)"
+  ) +
+  theme_minimal()
+
+cr_interact <- ggplotly(cr_static)
+cr_interact
+
+# Approved Conversion Rate
+
+acr_static <- ggplot(campaign_metrics, aes(x = factor(campaign_id), y = approved_cr)) +
+  geom_col(aes(fill = factor(campaign_id))) +
+  labs(
+    title = "Approved Conversion Rate per Campaign",
+    x = "Campaign ID",
+    y = "Approved CR (%)"
+  ) +
+  theme_minimal()
+
+acr_interact <- ggplotly(acr_static)
+acr_interact
+
+# Cost per click
+
+cpc_static <- ggplot(campaign_metrics, aes(x = factor(campaign_id), y = cpc)) +
+  geom_col(aes(fill = factor(campaign_id))) +
+  labs(
+    title = "Cost Per Click (CPC) per Campaign",
+    x = "Campaign ID",
+    y = "Cost ($)"
+  ) +
+  theme_minimal()
+
+cpc_interact <- ggplotly(cpc_static)
+cpc_interact
+
+# Cost per conversion 
+
+cpconv_static <- ggplot(campaign_metrics, aes(x = factor(campaign_id), y = cpcv)) +
+  geom_col(aes(fill = factor(campaign_id))) +
+  labs(
+    title = "Cost Per Conversion per Campaign",
+    x = "Campaign ID",
+    y = "Cost ($)"
+  ) +
+  theme_minimal()
+
+cpconv_interact <- ggplotly(cpconv_static)
+cpconv_interact
+```
+
+## API for Downstream Use in Big Query
+
+```{r}
+
+# library(httr2)
+# library(jsonlite)
+# 
+# bq_token <- oauth_client(
+#   id = NULL,
+#   token_url = "https://oauth2.googleapis.com/token",
+#   key = "path/to/service-account.json",
+#   scope = "https://www.googleapis.com/auth/bigquery"
+# ) |>
+#   req_oauth_token()
+# 
+# json_data <- toJSON(list(rows = lapply(seq_len(nrow(my_data_to_push)), function(i) {
+#   list(json = as.list(my_data_to_push[i, ]))
+# })), auto_unbox = TRUE)
+# 
+# 
+# project_id <- "your-gcp-project-id"
+# dataset_id <- "your_dataset"
+# table_id <- "your_table"
+# 
+# res <- request(
+#   paste0("https://bigquery.googleapis.com/bigquery/v2/projects/",
+#          project_id, "/datasets/", dataset_id, "/tables/", table_id, "/insertAll")
+# ) |> 
+#   req_headers(
+#     Authorization = paste("Bearer", bq_token$access_token),
+#     `Content-Type` = "application/json"
+#   ) |> 
+#   req_body_raw(json_data) |> 
+#   req_perform()
+# 
+# resp_status(res)
+# resp_body_json(res)
+```
