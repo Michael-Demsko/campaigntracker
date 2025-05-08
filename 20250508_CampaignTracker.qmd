@@ -72,22 +72,27 @@ Facebook Ads Data - Stored in PostgreSQL
 
 ```{r}
 
-# Establish a conneciton to the PG DB
-
-pg_con <- DBI::dbConnect(
-   RPostgres::Postgres(),
-   dbname = Sys.getenv("PGDATABASE"),
-   host = Sys.getenv("PGHOST"),
-   port = 5432,
-   user = Sys.getenv("PGUSER"),
-   password = Sys.getenv("PGPASSWORD")
-)
-
-# Retrieve all records from facebook_ads table
-
-facebook_ads_pg_df <- DBI::dbGetQuery(pg_con, "SELECT * FROM facebook_ads;")
-
-dbDisconnect(pg_con)
+# # Establish a conneciton to the PG DB
+# Commented out as to prevent issues with pulling from a local PostgreSQL server
+# 
+# pg_con <- DBI::dbConnect(
+#    RPostgres::Postgres(),
+#    dbname = Sys.getenv("PGDATABASE"),
+#    host = Sys.getenv("PGHOST"),
+#    port = 5432,
+#    user = Sys.getenv("PGUSER"),
+#    password = Sys.getenv("PGPASSWORD")
+# )
+# 
+# # Retrieve all records from facebook_ads table
+# 
+# facebook_ads_pg_df <- DBI::dbGetQuery(pg_con, "SELECT * FROM facebook_ads;")
+# 
+# # Savinf as an in-memory RDS to allow for remote deployment
+# saveRDS(facebook_ads_pg_df, "facebook_ads_pg_df.rds")
+# 
+# 
+# dbDisconnect(pg_con)
 ```
 
 Supplementary Campaign Info - Stored in Google Sheets
@@ -115,6 +120,10 @@ suppressMessages(
 **Columns names and data types**
 
 ```{r}
+
+# Read in-memory RDS file, again done here for lack of remote PostgreSQL instance
+
+facebook_ads_pg_df <- readRDS("facebook_ads_pg_df.rds")
 
 #  Columns, data types
 facebook_ads_pg_ds <- data.frame(
