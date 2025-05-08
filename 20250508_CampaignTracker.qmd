@@ -35,6 +35,7 @@ In this example, we will go through the entire data cycle. We'll **import Facebo
 # install.packages("RPostgres")
 # 
 # # Interact with JSON, manipulate data frames
+# install.packages("jsonlite")
 # install.packages("purrr")
 # install.packages("dplyr")
 # 
@@ -492,8 +493,6 @@ cpconv_interact
 
 ```{r}
 
-# library(httr2)
-# library(jsonlite)
 # 
 # bq_token <- oauth_client(
 #   id = NULL,
@@ -508,9 +507,9 @@ cpconv_interact
 # })), auto_unbox = TRUE)
 # 
 # 
-# project_id <- "your-gcp-project-id"
-# dataset_id <- "your_dataset"
-# table_id <- "your_table"
+# project_id <- "gcp-project-id"
+# dataset_id <- "dataset"
+# table_id <- "table"
 # 
 # res <- request(
 #   paste0("https://bigquery.googleapis.com/bigquery/v2/projects/",
