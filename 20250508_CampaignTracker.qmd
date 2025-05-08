@@ -15,7 +15,7 @@ editor: visual
 
 ## Description
 
-In this example, we will go through the entire data cycle. We'll **import Facebook Ads campaign data** from PostgreSQL via an ODBC connection as well as from Google Sheets using a combination of APIs wrapped within the googlesheets4 library. We'll **examine the data quality, clean accordingly, and wrangle the data** to get a complete picture. Next, we will conduct a brief **exploratory data analysis accompanied by visualizations** built with ggplot2 and plotly. Finally, we will **model the data** using Python's SciKit Learn and **build an API connection to share our findings** with GoogleBigQuery users.
+In this example, we will go through the entire data cycle. We'll **import Facebook Ads campaign data** from PostgreSQL via an ODBC connection as well as from Google Sheets using a combination of APIs wrapped within the googlesheets4 library. We'll **examine the data quality, clean accordingly, and wrangle the data** to get a complete picture. Next, we will conduct a brief **exploratory data analysis accompanied by visualizations** built with ggplot2 and plotly. Finally, we will **build an API connection to share our findings** with GoogleBigQuery users.
 
 ## Install/Load Libraries
 
